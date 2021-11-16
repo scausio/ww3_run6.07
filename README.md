@@ -1,4 +1,4 @@
-# install conda environment
+# install conda environment using environment.yml in ww3_run6.07/setup
 
 conda env create -f environment.yml
 
@@ -6,7 +6,7 @@ conda env create -f environment.yml
 
 - set properly the PATH variable in setup.sh to point to your ww3 directories
 
--source ww3_run6.07/setup.sh
+-source ww3_run6.07/setup/setup.sh
 
 # set the run
 
