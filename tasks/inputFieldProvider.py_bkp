@@ -1,0 +1,368 @@
+import xarray as xr
+import os
+import numpy as np
+import glob
+import pandas as pd
+import subprocess
+from datetime import datetime,timedelta,date
+from glob import glob
+from utils import dayBefore,dataFormatter,checkFunctionCompleted,seaoverland,getDaysBetweenDates
+
+def cutField(conf, fieldName, lon, lat):
+    tempFold = os.getcwd()
+    cut = conf.cutArea
+    if os.path.exists(tempFold + '/{}.npz'.format(fieldName)):
+        m = np.load(tempFold + '/{}.npz'.format(fieldName))
+        latId = m['maskLat']
+        lonId = m['maskLon']
+    else:
+        if not os.path.exists(tempFold):
+            os.makedirs(tempFold)
+        latId = (lat >= cut.lat[0]) & (lat <= cut.lat[1])
+        lonId = (lon >= cut.lon[0]) & (lon <= cut.lon[1])
+        np.savez(tempFold + '/{}'.format(fieldName), maskLon=lonId, maskLat=latId)
+    return lonId, latId
+
+def findLastForecast(forecast,day,conf):
+    try:
+        glob(forecast)[0]
+        return forecast
+    except:
+        n = 1
+        while n <= 6:
+            yesterday = (dataFormatter(day)- timedelta(days=n)).strftime('%Y%m%d')
+            forecast = buildFilePath(conf, 'meteoData', day, 'forecast',yesterday)
+            print ('forecast',forecast)
+            try:
+                glob(forecast)[0]
+                return forecast
+            except:
+                n += 1
+
+
+
+def buildFilePath(conf, dataset,day, analysisORforecast,yesterday=False):
+    fileconf = conf.copernicusFiles[dataset].fileConf
+    filename = fillPathTemplates(os.path.join(fileconf[analysisORforecast].base,fileconf[analysisORforecast].nameTemplate), fileconf, day, yesterday)
+    return filename
+
+def forecastAnalysisPath(forecast, analysis):
+    print (forecast,analysis)
+    try:# analysis
+        path = glob(analysis)[0]
+    except:  # forecast
+        path = glob(forecast)[0]
+
+    print(path, 'select')
+    return path
+
+def saveGridSpecs(lon1, lon2, lat1, lat2, lonSize, latSize, v):
+    lines = [lon1, lon2, lonSize, lat1, lat2, latSize]
+    with open('{}_gridSpecs.txt'.format(v), 'w') as out:
+        out.write(" '{}' 'LL' T T\n".format(v))
+        for l in lines:
+            out.write(' {} '.format(l))
+        out.close()
+
+
+def fillPathTemplates(template, fileConf, startdate,yesterday):
+
+    d = {'date': str(startdate),
+         'year': str(startdate)[:4],
+         'month': str(startdate)[4:6],
+         'yesterday': dayBefore(str(startdate)) if not yesterday else yesterday,
+         'freq': fileConf.freq,
+         'producer': fileConf.producer,
+         'parameter': fileConf.parameter,
+         'config': fileConf.config,
+         'region': fileConf.region,
+         'version': fileConf.version
+         }
+    return template.format(d=d)
+
+
+def getDataFromNEMO(path,conf,fieldType):
+    #field type can be: waterVelocity,waterLevel,surfaceTemp
+
+    fo = xr.open_mfdataset(path)
+    lon, lat = fo[conf.copernicusFiles.parentHydro.lat][:], fo[conf.copernicusFiles.parentHydro.lon][:]
+
+    saveGridSpecs(np.nanmin(lon), np.nanmax(lon),
+                  np.nanmin(lat), np.nanmax(lat),
+                  len(lon), len(lat), conf.copernicusFiles.parentHydro[fieldType].ww3Name)
+
+    # get data inside box
+    lonId, latId = cutField(conf, 'oceanMsk', lon, lat)
+    lat = lat[latId]
+    lon = lon[lonId]
+
+    fo[conf.copernicusFiles.parentHydro.time] = fo[conf.copernicusFiles.parentHydro.time].dt.floor('H')  # round hours
+    times = fo[conf.copernicusFiles.parentHydro.time][:]
+
+    t = [pd.to_datetime(str(time.time.values)).strftime('%Y%m%d %H%M%S') for time
+         in times.coords[conf.copernicusFiles.parentHydro.time]]
+
+    vars={}
+    if fieldType=='waterVelocity':
+        vars['u'] = conf.copernicusFiles.parentHydro.waterVelocity.u
+        vars['v'] = conf.copernicusFiles.parentHydro.waterVelocity.v
+
+        u = fo[vars['u']][:, latId, lonId]
+        print ('u', u.shape)
+        u.data = np.array([seaoverland(np.ma.masked_array(f, mask=np.isnan(f)), 5) for f in u])
+        v = fo[vars['v']][:, latId, lonId]
+        v.data = np.array([seaoverland(np.ma.masked_array(f, mask=np.isnan(f)), 5) for f in v])
+        print ('u sol', u.shape)
+        u = np.flip(u, axis=[1])
+        v = np.flip(v, axis=[1])
+        uv = xr.concat([u, v], dim='vars').transpose(u'time', u'vars', u'lat', u'lon')
+        return uv,  t, lat, lon
+
+    elif fieldType == 'waterLevel':
+        vars['lev'] = conf.copernicusFiles.parentHydro.waterLevel.ssh
+        lev = fo[vars['lev']][:, latId, lonId]
+        print ('lev', u.shape)
+        lev.data = np.array([seaoverland(np.ma.masked_array(f, mask=np.isnan(f)), 5) for f in lev])
+        lev = np.flip(lev, axis=[1])
+        return lev, t, lat, lon
+
+    elif fieldType == 'surfaceTemp':
+        vars['sst'] = conf.copernicusFiles.parentHydro.surfaceTemp.sst
+        sst = fo[vars['sst']][:, latId, lonId]
+        print ('sst', u.shape)
+        sst.data = np.array([seaoverland(np.ma.masked_array(f, mask=np.isnan(f)), 5) for f in sst])
+        sst = np.flip(sst, axis=[1])
+        return sst, t, lat, lon
+
+
+
+def getDataFromECMWF(path,conf):
+
+    fo = xr.open_mfdataset(path)
+    lon, lat = fo[conf.copernicusFiles.meteoData.lon][:], fo[conf.copernicusFiles.meteoData.lat][:]
+
+    lonId, latId = cutField(conf, 'meteoMsk', lon, lat)
+    lat = lat[latId]
+    lon = lon[lonId]
+
+    # save grid specifics
+    saveGridSpecs(np.nanmin(lon), np.nanmax(lon), np.nanmin(lat), np.nanmax(lat), len(lon), len(lat), conf.copernicusFiles.meteoData.ww3Name)
+    vars={}
+    vars['u'] = conf.copernicusFiles.meteoData.u
+    vars['v'] = conf.copernicusFiles.meteoData.v
+    vars['T2M'] = conf.copernicusFiles.meteoData.T2M
+
+    fo[conf.copernicusFiles.meteoData.time] = fo[conf.copernicusFiles.meteoData.time].dt.floor('H')  # round hours
+    times = fo[conf.copernicusFiles.meteoData.time][:]
+    t = [pd.to_datetime(str(time.time.values)).strftime('%Y%m%d %H%M%S') for time
+         in times.coords[conf.copernicusFiles.meteoData.time]]
+
+    u=fo[vars['u']][:, latId, lonId]
+    print ('u', u.shape)
+    u.data=np.array([seaoverland(np.ma.masked_array(f, mask=np.isnan(f)),5)for f in u])
+    v=fo[vars['v']][:, latId, lonId]
+    v.data=np.array([seaoverland(np.ma.masked_array(f, mask=np.isnan(f)),5)for f in v])
+    print ('u sol',u.shape)
+    u=np.flip(u,axis=[1])
+    v=np.flip(v,axis=[1])
+    try:
+        temp = fo[vars['T2M']][:, latId, lonId]
+        temp.data = np.array([seaoverland(np.ma.masked_array(f, mask=np.isnan(f)),5) for f in temp])
+        temp=np.flip(temp,axis=[1])
+    except:
+        temp = []
+    uv = xr.concat([u, v],dim='vars').transpose(u'time',u'vars', u'lat', u'lon')
+    print ('uv',uv.shape)
+    return uv, temp, t, lat, lon
+
+
+class WNSgetter():
+    def __init__(self, conf, date,duration, fillValue):
+        self.workPath = os.getcwd()
+        self.conf = conf
+        self.date = date
+        self.fillValue = fillValue
+        self.duration=int(duration)
+        print('getting WNS')
+
+
+    def write(self, outName, wind, dt):
+        with open(os.path.join(self.workPath, outName), 'w')as o:
+            for n, time in enumerate(wind['time']):
+                o.write(time + '\n')
+                for var in wind['WND'][n]:
+                    for i in var[:].values.flatten():
+                        i = str(i)
+                        if i == 'nan':
+                            i = str(self.fillValue)
+                        o.write('%s ' % i)
+                    o.write('\n')
+                for h in dt[n].values.flatten():
+                    h = str(h)
+                    if h == 'nan':
+                        h = str(self.fillValue)
+                    o.write('%s ' % h)
+                o.write('\n')
+        o.close()
+
+    def manageSST(self):
+
+        days=getDaysBetweenDates(self.date,self.duration+1)
+        sstFiles = [selectInputFile(self.conf, 'surfaceTemp', day) for day in days]
+        SST, time, lat, lon = getDataFromNEMO(sstFiles,self.conf,'surfaceTemp')
+
+        return {'SST': SST, 'lat': lat, 'lon': lon}
+
+    def manageWind(self):
+
+        days=getDaysBetweenDates(self.date,self.duration+1)
+        wndFromAthena=[selectInputFile(self.conf,'meteoData',day)for day in days]
+
+        WND, T2M, time, lat, lon = getDataFromECMWF(wndFromAthena,self.conf)
+
+
+
+        if T2M:
+            if T2M.attrs['units'] in ['K', 'Kelvin', 'k', 'degK']:
+                T2M = T2M - 273.15
+                return {'WND': WND, 'T2M': T2M, 'lat': lat, 'lon': lon, 'time': time}
+        else:
+
+            return {'WND': WND, 'T2M': T2M, 'lat': lat, 'lon': lon, 'time': time}
+
+    def getDeltaT(self, wind, surfTemp):
+        outname = os.path.join(self.workPath, 'dT_{}'.format(self.date))
+        t = surfTemp["SST"].interp(lat=wind['lat'], lon=wind['lon'])
+
+        dT = wind['T2M'].values - t
+
+        np.save('{}.npy'.format(outname), dT)
+        return {'dT': dT}
+
+    def getWNS(self):
+        outname = 'WNS.data'
+        WND = self.manageWind()  # ,T2M,latW,lonW
+        SST = self.manageSST()  # ,latT,lonT # u can force computation with force=True
+        dT = self.getDeltaT(WND, SST)
+        print('... done ...')
+        self.write(outname, WND, dT['dT'])
+
+
+class CURgetter():
+
+    def __init__(self, conf, date,duration, fillValue):
+        self.workPath = os.getcwd()
+        self.conf = conf
+        self.date = date
+        self.fillValue = fillValue
+        self.duration=int(duration)
+        print('getting Currents')
+
+    def write(self, outName, cur):
+        with open(os.path.join(self.workPath, outName), 'w')as o:
+            for n, time in enumerate(cur['time']):
+                o.write(time + '\n')
+                for var in cur['CUR'][n]:
+                    for i in var.flatten():
+                        i = str(i)
+                        if i == 'nan':
+                            i = str(self.fillValue)
+                        o.write('%s ' % i)
+                    o.write('\n')
+                o.write('\n')
+        o.close()
+
+    def manageCUR(self):
+
+        days=getDaysBetweenDates(self.date,self.duration+1)
+        curFiles = [selectInputFile(self.conf, 'waterVelocity', day) for day in days]
+        CUR, time, lat, lon = getDataFromNEMO(curFiles,self.conf,'waterVelocity')
+        return {'CUR': CUR, 'lat': lat, 'lon': lon, 'time': time}
+
+    def getCUR(self):
+        outname = 'CUR.data'
+        CUR = self.manageCUR()  # ,latT,lonT # u can force computation with force=True
+        print('... done ...')
+        self.write(outname, CUR)
+
+
+class LEVgetter():
+    def __init__(self,  conf, date,duration, fillValue):
+        self.workPath = os.getcwd()
+        self.conf = conf
+        self.date = date
+        self.fillValue = fillValue
+        self.duration=int(duration)
+        print('getting Sea Level')
+
+    def write(self, outName, lev):
+        with open(os.path.join(self.workPath, outName), 'w')as o:
+            for n, time in enumerate(lev['time']):
+                o.write(time + '\n')
+                for i in lev['LEV'][n].flatten():
+                    i = str(i)
+                    if i == 'nan':
+                        i = str(self.fillValue)
+                    o.write('%s ' % i)
+                o.write('\n')
+        o.close()
+
+    def manageLEV(self):
+        days=getDaysBetweenDates(self.date,self.duration+1)
+        levFiles = [selectInputFile(self.conf, 'waterLevel', day) for day in days]
+        LEV, time, lat, lon = getDataFromNEMO(levFiles,self.conf,'waterLevel')
+        return {'LEV': LEV, 'lat': lat, 'lon': lon, 'time': time}
+
+    def getLEV(self):
+        outname = 'LEV.data'
+        LEV = self.manageLEV()
+        print('... done ...')
+        self.write(outname, LEV)
+
+
+class WNDgetter():
+
+    def __init__(self, conf, date,duration, fillValue):
+        self.workPath = os.getcwd()
+        self.conf = conf
+        self.date = date
+        self.fillValue = fillValue
+        self.duration=int(duration)
+        print('getting WND')
+
+    def write(self, outName, wind):
+        with open(os.path.join(self.workPath, outName), 'w')as o:
+            for n, time in enumerate(wind['time']):
+                o.write(time + '\n')
+                for var in wind['WND'][n]:
+                    for i in var[:].values.flatten():
+                        i = str(i)
+                        if i == 'nan':
+                            i = str(self.fillValue)
+                        o.write('%s ' % i)
+                    o.write('\n')
+                o.write('\n')
+        o.close()
+
+
+    def manageWind(self):
+
+        days=getDaysBetweenDates(self.date,self.duration+1)
+        wndFromAthena=[selectInputFile(self.conf,'meteoData',day)for day in days]
+
+        WND, T2M, t, lat, lon = getDataFromECMWF(wndFromAthena,self.conf)
+        return {'WND': WND, 'T2M': T2M, 'lat': lat, 'lon': lon, 'time': t}
+
+    def getWND(self):
+        outname = 'WND.data'
+        WND = self.manageWind()
+        print('... done ...')
+        self.write(outname, WND)
+
+
+def selectInputFile(conf,inputType,when):
+    forecast = buildFilePath(conf, inputType, when, 'forecast')
+    forecast = findLastForecast(forecast, when, conf)
+    analysis = buildFilePath(conf, inputType, when, 'analysis')
+    return forecastAnalysisPath(forecast, analysis)
+

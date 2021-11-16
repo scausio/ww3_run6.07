@@ -1,0 +1,2 @@
+source /users_home/opa/sc33616/systems/ww3_run2/setup.sh
+bsub -o log.out -e log.err  python runme.py -s [startdate] -d [days] or -e [enddate]

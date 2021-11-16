@@ -1,0 +1,149 @@
+config:
+  modelName: name
+  base: /users_home/opa/
+  runpath: /work/opa/
+  copernicusFiles:
+    parentWave:
+      lat: latitude
+      lon: longitude
+      time: time
+      hs: 'VHM0'         # for computing spectra
+      tp: 'VTPK'         # for computing spectra
+      efth: ''       # for extracting spectra
+      freq: ''  # for extracting spectra
+      dir: 'VMDR'   # for extracting spectra
+      fileConf:
+        freq: 1h  
+        producer: HCMR
+        parameter: WAVE  # WAVE
+        config: MEDWAM3
+        region: MEDATL
+        version: "sv01.00"
+        analysis:
+          base: '/data/inputs/metocean/historical/model/ocean/HCMR/WAM_CMEMS/reanalysis/{d[freq]}/{d[year]}/{d[month]}'    #'/data/inputs/metocean/rolling/ocean/HCMR/CMEMS/3.1analysis/{d[freq]}/{d[yesterday]}'
+          nameTemplate: '{d[date]}*-{d[producer]}--{d[parameter]}-{d[config]}-{d[region]}-*{d[version]}.nc*'
+        forecast:
+          base: '/data/inputs/metocean/rolling/ocean/HCMR/spectra/1.0forecast/3h/{d[yesterday]}'    #'/data/inputs/metocean/rolling/ocean/HCMR/CMEMS/1.0forecast/{d[freq]}/{d[yesterday]}'
+          nameTemplate: '{d[date]}*-{d[producer]}--{d[parameter]}-{d[config]}-{d[region]}-*{d[version]}.nc*'
+    parentHydro:
+      waterVelocity:
+          u: uo
+          v: vo
+          ww3Name: 'CUR'
+      waterLevel:
+          ssh: zos
+          ww3Name: 'LEV'
+      surfaceTemp:
+          sst: thetao
+          ww3Name: 'WND'
+      lon: lon
+      lat: lat
+      time: time
+      depth: deptht
+      fileConf:
+        freq: h  
+        producer: X
+        config: X
+        region: X
+        parameter: X
+        version: "sv0x.00"
+        analysis:
+          base: ''
+          nameTemplate: 'grid_T_{d[date]}.nc'
+        forecast:
+          base: ''
+          nameTemplate: '{d[date]}_*nc'
+    meteoData:
+      lat: lat
+      lon: lon
+      time: time
+      u:  U10M
+      v:  V10M
+      T2M: T2M
+      ww3Name: WND
+      fileConf:
+        info: select WND or WNS in ww3Name to select wind only or wind and dT.
+        freq: 6h  # daily
+        producer: ECMWF
+        config: AM0125
+        region: MEDATL
+        parameter: ""
+        version: "fv10.00"
+        analysis:
+          base: '/data/inputs/metocean/historical/model/atmos/ECMWF/IFS_0125/analysis/{d[freq]}/netcdf/{d[year]}/{d[month]}/'
+          nameTemplate: '{d[date]}-{d[producer]}---{d[config]}-{d[region]}-*{d[version]}.nc*'
+        forecast:
+          base: '/data/inputs/metocean/rolling/atmos/ECMWF/IFS_0125/1.0forecast/6h/netcdf/{d[yesterday]}'
+          nameTemplate: '{d[date]}_12_12km.nc*'
+  cutArea:
+    lat: [37,41]
+    lon: [15, 19.]
+  grid:
+    fillValue: -99999
+    id: ww3
+    bottomFile: /users_home/opa/models/data/.msh
+    obstFile_regular: "" # for regular grid
+    obstFile_local: /users_home/opa/obstructions_local._obst.in # for unstructured grid
+    obstFile_shadow: /users_home/opa/obstructions_shadow._obst.in # for unstructured grid
+    maskFile: .mask
+    ncGrid: .nc
+    depthScaleFactor: -1
+    frequencyIncrement: 1.1
+    minFrequency: 0.05
+    NoFrequencies: 32
+    NoDirections: 24
+    type: UNST
+    noNodes: 30731
+    lonSize: 
+    latSize: 
+    latResolution: 
+    lonResolution: 
+    minLon: 
+    minLat: 
+    depthLimit: 0
+    minDepth: 0.5
+    namelist: ["&SIN4 BETAMAX=1.2, TAUWSHELTER = 0.1", "ZALP=0.005",
+                "&SLN1 CLIN =  100.0",
+               "&SDS4 SDSBR =0.8E-03",
+               "&REF1 REFCOAST=0.1",
+               "&UNST UGOBCAUTO=F, IMPFSN= T/"]
+  timeStep:
+    global_TS: 200
+    CFL_TS: 50
+    refraction_TS: 50
+    minimum_TS: 10
+  model:
+    type: multiprocess
+    executable: /users_home/opa/WW3/model/exe
+    templates: /users_home/opa/data/templates
+    serial_queue: s_long
+    project_queue: "R000"
+    limitDuration: 10
+    multiprocess:
+      queue: p_long
+      cores: 216
+    forcings:
+      windFlag: 'T'
+      curFlag: 'F'
+      levFlag: 'F'
+      itype: 3 
+    lateralBoundaries:
+      refreshIndices: 'T'
+      memoryUsage: '40GB'
+      path: data/boundary/bc.dat
+      type: computed # computed, fromParent, F
+    output:
+      fields: 'HS T01 DIR SXY'
+      timeInterval: 3600
+      outname: ww3.
+  post:
+      regrid:
+        flag: 'F'
+        regridderPath: /users_home/opa/toolz/unstruct
+        outFolder: 
+        topology: tri
+        area:
+          gulf:
+            variables: ['hs','t01','dir']
+            resolution: 0.03
+            boundingBox: [20.451, 37.524, 21.067, 38.026]
