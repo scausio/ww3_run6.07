@@ -319,7 +319,7 @@ class SurfaceBoundaryCondition():
             out.write('$\n ')
             out.write(f"'{field}' 'LL' T T\n")
             out.write('$\n ')
-            out.write(f"lon lat\n".format(lon=self.conf.copernicusFiles.meteoData.lon,lat=self.conf.copernicusFiles.meteoData.lat))
+            out.write("{lon} {lat}\n".format(lon=self.conf.copernicusFiles.meteoData.lon,lat=self.conf.copernicusFiles.meteoData.lat))
             out.write('$\n ')
             if field=='WND':
                 out.write("{U} {V}\n".format(U=self.conf.copernicusFiles.meteoData.u,V=self.conf.copernicusFiles.meteoData.v))

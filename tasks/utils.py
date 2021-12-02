@@ -86,20 +86,20 @@ def add90(deg):
 def fixBCdir(deg, negativeVal=False):
     if negativeVal:
         deg=deg0_360(deg)
-    if isinstance(deg,np.ndarray):
-
-        m_low=deg <= 180
-        m_hi=deg > 180
-        
-        deg[m_low]=np.abs(deg[m_low]- 180)
-        deg[m_hi]=360 - (np.abs(deg[m_hi] - 180))
-
-    else:
-        if deg <= 180:
-            deg = np.abs(deg - 180)
-        else:
-            deg = 360 - (np.abs(deg - 180))
-    return deg
+    # if isinstance(deg,np.ndarray):
+    #
+    #     m_low=deg <= 180
+    #     m_hi=deg > 180
+    #
+    #     deg[m_low]=np.abs(deg[m_low]- 180)
+    #     deg[m_hi]=360 - (np.abs(deg[m_hi] - 180))
+    #
+    # else:
+    #     if deg <= 180:
+    #         deg = np.abs(deg - 180)
+    #     else:
+    #         deg = 360 - (deg - 180)
+    return (180-deg)%360
 
 
 
