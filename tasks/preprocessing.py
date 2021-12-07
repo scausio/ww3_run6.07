@@ -110,7 +110,7 @@ class Preprocessing():
              
         else:
             simlinks = [os.path.join(self.conf.base, self.conf.grid.bottomFile),
-                        os.path.join(self.conf.base, self.conf.grid.obstFile),
+                        os.path.join(self.conf.base, self.conf.grid.obstFile_regular),
                         os.path.join(self.conf.base, self.conf.grid.maskFile)]
         for f in simlinks:
             try:
@@ -319,15 +319,26 @@ class SurfaceBoundaryCondition():
             out.write('$\n ')
             out.write(f"'{field}' 'LL' T T\n")
             out.write('$\n ')
-            out.write("{lon} {lat}\n".format(lon=self.conf.copernicusFiles.meteoData.lon,lat=self.conf.copernicusFiles.meteoData.lat))
-            out.write('$\n ')
+
             if field=='WND':
+                out.write("{lon} {lat}\n".format(lon=self.conf.copernicusFiles.meteoData.lon,
+                                                 lat=self.conf.copernicusFiles.meteoData.lat))
+                out.write('$\n ')
                 out.write("{U} {V}\n".format(U=self.conf.copernicusFiles.meteoData.u,V=self.conf.copernicusFiles.meteoData.v))
             elif field=='WNS':
+                out.write("{lon} {lat}\n".format(lon=self.conf.copernicusFiles.meteoData.lon,
+                                                 lat=self.conf.copernicusFiles.meteoData.lat))
+                out.write('$\n ')
                 out.write("{U} {V} DT\n".format(U=self.conf.copernicusFiles.meteoData.u,V=self.conf.copernicusFiles.meteoData.v))
             elif field=='CUR':
+                out.write("{lon} {lat}\n".format(lon=self.conf.copernicusFiles.parentHydro.lon,
+                                                 lat=self.conf.copernicusFiles.parentHydro.lat))
+                out.write('$\n ')
                 out.write("{U} {V} \n".format(U=self.conf.copernicusFiles.parentHydro.waterVelocity.u,V=self.conf.copernicusFiles.parentHydro.waterVelocity.v))
             elif field=='LEV':
+                out.write("{lon} {lat}\n".format(lon=self.conf.copernicusFiles.parentHydro.lon,
+                                                 lat=self.conf.copernicusFiles.parentHydro.lat))
+                out.write('$\n ')
                 out.write("{SSH} \n".format(SSH=self.conf.copernicusFiles.parentHydro.waterLevel.ssh))
             out.write('$\n ')
             out.write(f"'{field}.nc'")
